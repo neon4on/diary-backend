@@ -1,11 +1,13 @@
-import { Module, MiddlewareConsumer } from '@nestjs/common';
-import { authMiddleware } from './auth/auth.middleware';
+import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { RolesGuard } from './auth/roles.guard';
 
 @Module({
-  imports: [],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
+    },
+  ],
 })
-export class AppModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer.apply(authMiddleware).forRoutes('*');
-  }
-}
+export class AppModule {}
