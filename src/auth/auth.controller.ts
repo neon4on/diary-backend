@@ -3,17 +3,13 @@ import { Request } from 'express';
 
 @Controller('auth')
 export class AuthController {
-  @Get('me')
-  getMe(@Req() req: Request) {
-    if (!req.session?.uid) {
-        return { authenticated: false };
+    @Get('me')
+    getMe(@Req() req: any) {
+        return {
+            authenticated: true,
+            id: req.user.id,
+            name: req.user.name,
+            roleId: req.user.roleId,
+        };
     }
-
-    return {
-        authenticated: true,
-        uid: req.session.uid,
-        roles: req.session.right,
-        status: req.session.status,
-    };
-  }
 }

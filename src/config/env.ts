@@ -14,4 +14,5 @@ export const env = {
   },
 
   sessionName: process.env.SESSION_NAME ?? 'sso.sid',
+  jwtSecret: process.env.JWT_SECRET!,
 };
