@@ -16,6 +16,6 @@ import { jwtMiddleware } from './auth/jwt.middleware';
 
 export class AppModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(jwtMiddleware).forRoutes('*');
+    consumer.apply(jwtMiddleware).forRoutes('*path');
   }
 }
