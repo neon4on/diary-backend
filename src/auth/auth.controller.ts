@@ -26,7 +26,7 @@ export class AuthController {
   @Post('pin')
   async login(@Body('pin') pin: string, @Req() req: any) {
 
-    const user = await this.authService.loginByPin(pin);
+    const user = await this.authService.login(pin);
 
     req.session.user = {
       id: user.id,
