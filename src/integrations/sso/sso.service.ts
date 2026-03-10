@@ -47,10 +47,10 @@ export class SsoService {
           client_id: 'diary',
           redirect_uri: 'https://diary.platoniks.ru/cb',
           response_type: 'code',
-          audience: 4
+          audience: 11
         },
         maxRedirects: 0,
-        validateStatus: () => true
+        validateStatus: s => s === 302
       }
     );
 
@@ -61,6 +61,12 @@ export class SsoService {
     if (!location) {
       throw new Error('SSO_NO_REDIRECT');
     }
+
+    this.log.log({
+        step: 'AUTHORIZE_REDIRECT',
+        status: authorizeResp.status,
+        location: authorizeResp.headers.location
+    });
 
     /*
     STEP 3 — CODE
@@ -76,6 +82,14 @@ export class SsoService {
     if (!code) {
       throw new Error('NO_CODE_FROM_SSO');
     }
+
+    this.log.log({
+        step: 'TOKEN_REQUEST',
+        client_id: 'diary',
+        client_secret: process.env.CLIENT_SECRET,
+        redirect_uri: 'https://diary.platoniks.ru/cb',
+        code
+    });
 
     /*
     STEP 4 — TOKEN
