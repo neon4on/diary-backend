@@ -31,7 +31,7 @@ export class AuthController {
     req.session.user = {
       id: user.id,
       name: user.name,
-      roleId: user.roleId,
+      roleId: user.rights?.[0]?.id
     };
 
     return { success: true };
