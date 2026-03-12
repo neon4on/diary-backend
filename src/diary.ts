@@ -41,6 +41,7 @@ async function bootstrap() {
 
 
   logger.info(`Server started on port 3003`);
+  logger.info(`env.sessionName: ${env.sessionName}`);
 }
 
 bootstrap();

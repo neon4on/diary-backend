@@ -35,6 +35,11 @@ export class SsoService {
       status: authResp.status
     });
 
+    logger.info({
+      step: 'client_secret',
+      status: process.env.CLIENT_SECRET!,
+    });
+
     if (authResp.data !== 'ok') {
       throw new Error('PIN_INVALID');
     }
