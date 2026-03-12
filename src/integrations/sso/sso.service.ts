@@ -1,13 +1,13 @@
+import { Injectable } from '@nestjs/common';
 import axios from 'axios';
 import { wrapper } from 'axios-cookiejar-support';
 import { CookieJar } from 'tough-cookie';
-import { Injectable, Logger } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
+
+import { logger } from '../../logger/logger';
 
 @Injectable()
 export class SsoService {
-
-  private readonly log = new Logger('SSO');
 
   async loginByPin(pin: string) {
 
@@ -22,7 +22,7 @@ export class SsoService {
     );
 
     /*
-    STEP 1 — AUTH
+    AUTH
     */
 
     const authResp = await client.get(
@@ -30,14 +30,17 @@ export class SsoService {
       { params: { pin } }
     );
 
-    this.log.log(`AUTH status=${authResp.status} body=${authResp.data}`);
+    logger.info({
+      step: 'SSO_AUTH',
+      status: authResp.status
+    });
 
     if (authResp.data !== 'ok') {
       throw new Error('PIN_INVALID');
     }
 
     /*
-    STEP 2 — AUTHORIZE
+    AUTHORIZE
     */
 
     const authorizeResp = await client.get(
@@ -54,22 +57,19 @@ export class SsoService {
       }
     );
 
-    const location = authorizeResp.headers.location;
+    logger.info({
+      step: 'SSO_AUTHORIZE',
+      status: authorizeResp.status
+    });
 
-    this.log.log(`AUTHORIZE status=${authorizeResp.status} redirect=${location}`);
+    const location = authorizeResp.headers.location;
 
     if (!location) {
       throw new Error('SSO_NO_REDIRECT');
     }
 
-    this.log.log({
-        step: 'AUTHORIZE_REDIRECT',
-        status: authorizeResp.status,
-        location: authorizeResp.headers.location
-    });
-
     /*
-    STEP 3 — CODE
+    CODE
     */
 
     const code = new URL(
@@ -77,22 +77,12 @@ export class SsoService {
       'https://diary.platoniks.ru'
     ).searchParams.get('code');
 
-    this.log.log(`CODE ${code}`);
-
     if (!code) {
       throw new Error('NO_CODE_FROM_SSO');
     }
 
-    this.log.log({
-        step: 'TOKEN_REQUEST',
-        client_id: 'diary',
-        client_secret: process.env.CLIENT_SECRET,
-        redirect_uri: 'https://diary.platoniks.ru/cb',
-        code
-    });
-
     /*
-    STEP 4 — TOKEN
+    TOKEN
     */
 
     const tokenResp = await client.post(
@@ -111,22 +101,33 @@ export class SsoService {
       }
     );
 
-    this.log.log(`TOKEN status=${tokenResp.status}`);
+    logger.info({
+      step: 'SSO_TOKEN',
+      status: tokenResp.status
+    });
 
     const accessToken = tokenResp.data.access_token;
 
     if (!accessToken) {
-      this.log.error(JSON.stringify(tokenResp.data));
+      logger.error({
+        step: 'SSO_TOKEN_FAIL',
+        data: tokenResp.data
+      });
+
       throw new Error('NO_ACCESS_TOKEN');
     }
 
     /*
-    STEP 5 — JWT
+    USER
     */
 
     const payload: any = jwt.decode(accessToken);
 
-    this.log.log(`USER id=${payload?.sub} name=${payload?.name}`);
+    logger.info({
+      step: 'SSO_USER',
+      id: payload?.sub,
+      name: payload?.name
+    });
 
     return {
       id: payload.sub,
