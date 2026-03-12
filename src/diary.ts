@@ -10,7 +10,6 @@ import path from 'path';
 import crypto from 'crypto';
 
 async function bootstrap() {
-
   const logDir = path.join(process.cwd(), 'diary');
 
   if (!fs.existsSync(logDir)) {
@@ -23,16 +22,12 @@ async function bootstrap() {
       targets: [
         {
           target: 'pino/file',
-          options: {
-            destination: path.join(logDir, 'app.log'),
-          },
+          options: { destination: path.join(logDir, 'app.log') },
         },
         {
           target: 'pino/file',
           level: 'error',
-          options: {
-            destination: path.join(logDir, 'error.log'),
-          },
+          options: { destination: path.join(logDir, 'error.log') },
         },
       ],
     },
@@ -71,7 +66,6 @@ async function bootstrap() {
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
-      forbidNonWhitelisted: true,
       transform: true,
     }),
   );
