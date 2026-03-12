@@ -37,12 +37,10 @@ async function bootstrap() {
     })
   );
 
-  await app.listen(env.port);
+  await app.listen(3003);
 
-  logger.info({
-    event: 'server_started',
-    port: env.port
-  });
+
+  logger.info(`Server started on port 3003`);
 }
 
 bootstrap();
