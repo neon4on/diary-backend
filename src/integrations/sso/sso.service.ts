@@ -3,6 +3,7 @@ import axios from 'axios';
 import { wrapper } from 'axios-cookiejar-support';
 import { CookieJar } from 'tough-cookie';
 import * as jwt from 'jsonwebtoken';
+import { ssoDb } from '../../db/sso.knex';
 
 import { logger } from '../../logger/logger';
 
@@ -128,17 +129,39 @@ export class SsoService {
 
     const payload: any = jwt.decode(accessToken);
 
+    if (!payload?.sub) {
+        throw new Error('INVALID_TOKEN_PAYLOAD');
+    }
+
+    /*
+    GET USER FROM SSO DB
+    */
+
+    const userRow = await ssoDb('users')
+        .select('id', 'name', 'type')
+        .where('id', payload.sub)
+        .first();
+
+    if (!userRow) {
+        logger.error({
+            step: 'SSO_USER_NOT_FOUND',
+            userId: payload.sub
+        });
+
+        throw new Error('USER_NOT_FOUND_IN_SSO_DB');
+    }
+
     logger.info({
-      step: 'SSO_USER',
-      id: payload?.sub,
-      name: payload?.name
+        step: 'SSO_USER_DB',
+        id: userRow.id,
+        name: userRow.name,
+        role: userRow.type
     });
 
     return {
-      id: payload.sub,
-      name: payload.name,
-      rights: payload.right,
-      logins: payload.logins
+        id: userRow.id,
+        name: userRow.name,
+        roleId: userRow.type
     };
   }
 }

@@ -29,12 +29,14 @@ export class AuthController {
     const user = await this.authService.login(pin);
 
     req.session.user = {
-      id: user.id,
-      name: user.name,
-      roleId: user.rights?.[0]?.id
+        id: user.id,
+        name: user.name,
+        roleId: user.roleId
     };
 
-    return { success: true };
+    return {
+        user: req.session.user
+    };
   }
 
   @Post('logout')
