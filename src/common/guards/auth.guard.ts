@@ -14,6 +14,8 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException();
     }
 
+    req.user = req.session.user;
+
     return true;
   }
 }
