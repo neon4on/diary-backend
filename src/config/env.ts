@@ -13,6 +13,13 @@ export const env = {
     name: process.env.DB_NAME!,
   },
 
+  ssoDb: {
+    host: process.env.DB_HOST!,
+    user: process.env.DB_USER!,
+    password: process.env.DB_PASSWORD!,
+    name: process.env.SSO_DB_NAME!,
+  },
+
   sessionName: process.env.SESSION_NAME ?? 'sso.sid',
   jwtSecret: process.env.JWT_SECRET!,
 };
