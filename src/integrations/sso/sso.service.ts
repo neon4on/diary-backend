@@ -41,6 +41,26 @@ export class SsoService {
       status: process.env.CLIENT_SECRET!,
     });
 
+    logger.info({
+        step: 'ENV_CHECK',
+        hasEnv: Object.keys(process.env).length,
+    });
+
+    logger.info({
+        step: 'SSO_DB_NAME',
+        value: process.env.SSO_DB_NAME ?? 'UNDEFINED',
+    });
+
+    logger.info({
+        step: 'CWD',
+        cwd: process.cwd(),
+    });
+
+    logger.info({
+        step: 'PM2_CONTEXT',
+        pm2: process.env.pm_id,
+    });
+
     if (authResp.data !== 'ok') {
       throw new Error('PIN_INVALID');
     }
