@@ -120,4 +120,54 @@ export class GradesService {
 
         return Object.values(result);
     }
+
+    async getLessonGrades(lessonId: number) {
+        // 1. получаем урок
+        const lesson = await db('diary_lessons')
+            .select('class_id', 'subject_id')
+            .where('id', lessonId)
+            .first();
+
+        if (!lesson) {
+            throw new Error('LESSON_NOT_FOUND');
+        }
+
+        const { class_id, subject_id } = lesson;
+
+        // 2. получаем учеников + оценки
+        const rows = await db('school_local.info_kid_subject_teacher as kst')
+            .leftJoin('diary_marks as m', function () {
+            this.on('m.student_id', '=', 'kst.kid_id')
+                .andOn('m.lesson_id', '=', db.raw('?', [lessonId]));
+            })
+            .leftJoin('diary_mark_types as mt', 'mt.id', 'm.mark_type_id')
+
+            .where('kst.class_id', class_id)
+            .andWhere('kst.subject_id', subject_id)
+
+            .select([
+            'kst.kid_id as student_id',
+            'kst.class_id',
+            'kst.subject_id',
+            'kst.subject_name',
+
+            'm.id as mark_id',
+            'm.comment',
+
+            'mt.id as mark_type_id',
+            'mt.code as mark',
+            'mt.numeric_value'
+            ])
+
+            .groupBy('kst.kid_id');
+
+        return {
+            lesson: {
+            id: lessonId,
+            class_id,
+            subject_id
+            },
+            students: rows
+        };
+    }
 }
