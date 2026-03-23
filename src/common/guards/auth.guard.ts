@@ -16,6 +16,13 @@ export class AuthGuard implements CanActivate {
 
     req.user = req.session.user;
 
+    // LOCAL
+    // req.user = {
+    //     id: 1001,
+    //     roleId: 1,
+    //     name: 'TEST'
+    // };
+
     return true;
   }
 }
