@@ -17,6 +17,11 @@ async function bootstrap() {
 
   app.use(httpLogger);
 
+  app.enableCors({
+    origin: true,
+    credentials: true,
+  });
+
   app.use(
     session({
       name: env.sessionName,
