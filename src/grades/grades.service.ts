@@ -170,4 +170,145 @@ export class GradesService {
             students: rows
         };
     }
+
+    async upsertGrade(dto: {
+            lessonId: number;
+            studentId: number;
+            markTypeId: number;
+            comment?: string;
+            teacherId: number;
+        }) {
+
+        // 1. проверка lock
+        const lock = await db('diary_mark_locks')
+            .where({ lesson_id: dto.lessonId })
+            .whereNotNull('locked_at')
+            .first();
+
+        if (lock) {
+            throw new Error('MARKS_LOCKED');
+        }
+
+        // 2. проверка существующей оценки
+        const existing = await db('diary_marks')
+            .where({
+            lesson_id: dto.lessonId,
+            student_id: dto.studentId
+            })
+            .whereNull('deleted_at')
+            .first();
+
+        if (existing) {
+            // UPDATE
+            await db('diary_marks')
+            .where({ id: existing.id })
+            .update({
+                mark_type_id: dto.markTypeId,
+                comment: dto.comment
+            });
+
+            return { updated: true };
+        }
+
+        // INSERT
+        await db('diary_marks').insert({
+            lesson_id: dto.lessonId,
+            student_id: dto.studentId,
+            mark_type_id: dto.markTypeId,
+            comment: dto.comment,
+            teacher_id: dto.teacherId
+        });
+
+        return { created: true };
+    }
+
+    async bulkUpsertGrades(dto: {
+  lessonId: number;
+  studentIds?: number[];
+  markTypeId?: number;
+  grades?: { studentId: number; markTypeId: number }[];
+  comment?: string;
+  teacherId: number;
+}) {
+
+  // 1. lock check
+  const lock = await db('diary_mark_locks')
+    .where({ lesson_id: dto.lessonId })
+    .whereNotNull('locked_at')
+    .first();
+
+  if (lock) {
+    throw new Error('MARKS_LOCKED');
+  }
+
+  let items: { studentId: number; markTypeId: number }[] = [];
+
+  // режим 1 (одна оценка всем)
+  if (dto.studentIds && dto.markTypeId) {
+    items = dto.studentIds.map(id => ({
+      studentId: id,
+      markTypeId: dto.markTypeId!
+    }));
+  }
+
+  // режим 2 (разные оценки)
+  if (dto.grades) {
+    items = dto.grades;
+  }
+
+  if (!items.length) {
+    return { updated: 0 };
+  }
+
+  // 2. получаем существующие оценки
+  const existing = await db('diary_marks')
+    .where('lesson_id', dto.lessonId)
+    .whereIn('student_id', items.map(i => i.studentId))
+    .whereNull('deleted_at');
+
+  const existingMap = new Map(
+    existing.map(e => [e.student_id, e])
+  );
+
+  const toInsert: any[] = [];
+  const toUpdate: any[] = [];
+
+  for (const item of items) {
+    const found = existingMap.get(item.studentId);
+
+    if (found) {
+      toUpdate.push({
+        id: found.id,
+        mark_type_id: item.markTypeId
+      });
+    } else {
+      toInsert.push({
+        lesson_id: dto.lessonId,
+        student_id: item.studentId,
+        mark_type_id: item.markTypeId,
+        comment: dto.comment,
+        teacher_id: dto.teacherId
+      });
+    }
+  }
+
+  // 3. update
+  for (const u of toUpdate) {
+    await db('diary_marks')
+      .where({ id: u.id })
+      .update({
+        mark_type_id: u.mark_type_id
+      });
+  }
+
+  // 4. insert
+  if (toInsert.length) {
+    await db('diary_marks').insert(toInsert);
+  }
+
+  return {
+    updated: toUpdate.length,
+    created: toInsert.length
+  };
+}
 }

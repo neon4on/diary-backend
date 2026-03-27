@@ -4,7 +4,9 @@ import {
   Param,
   Req,
   UseGuards,
-  ParseIntPipe
+  ParseIntPipe,
+  Post,
+  Body
 } from '@nestjs/common';
 
 import { GradesService } from './grades.service';
@@ -23,13 +25,11 @@ export class GradesController {
    */
   @Get('my')
   async getMyGrades(@Req() req: any) {
-    const user = req.user;
-
-    return this.gradesService.getByStudent(user.id);
+    return this.gradesService.getByStudent(req.user.id);
   }
 
   /**
-   * Учитель — получить оценки по уроку
+   * Учитель — оценки по уроку (для журнала)
    */
   @Get('lesson/:id')
   @Roles(DiaryRole.TEACHER)
@@ -40,16 +40,31 @@ export class GradesController {
   }
 
   /**
-   * Ученик — домашка
+   * Учитель — поставить / обновить оценку
    */
-  @Get('homeworks/my')
-  async getMyHomeworks(@Req() req: any) {
-    const user = req.user;
-
-    // ВРЕМЕННО — пока нет связки student → class
-    const classId = 8;
-
-    return this.gradesService.getMyHomeworks(user.id, classId);
+  @Post()
+  @Roles(DiaryRole.TEACHER)
+  async setGrade(@Body() body: any, @Req() req: any) {
+    return this.gradesService.upsertGrade({
+      lessonId: body.lessonId,
+      studentId: body.studentId,
+      markTypeId: body.markTypeId,
+      comment: body.comment,
+      teacherId: req.user.id
+    });
   }
 
+    @Post('bulk')
+    @Roles(DiaryRole.TEACHER)
+    async bulkSetGrades(@Body() body: any, @Req() req: any) {
+
+    return this.gradesService.bulkUpsertGrades({
+        lessonId: body.lessonId,
+        studentIds: body.studentIds,
+        markTypeId: body.markTypeId,
+        grades: body.grades,
+        comment: body.comment,
+        teacherId: req.user.id
+    });
+    }
 }
