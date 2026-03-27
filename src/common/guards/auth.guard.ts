@@ -10,18 +10,19 @@ export class AuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const req = context.switchToHttp().getRequest();
 
-    if (!req.session?.user) {
-      throw new UnauthorizedException();
+    if (process.env.NODE_ENV === 'dev') {
+        req.user = {
+            id: 92,
+            roleId: 2 
+        };
+        return true;
     }
 
-    req.user = req.session.user;
+    if (!req.session?.user) {
+        throw new UnauthorizedException();
+    }
 
-    // LOCAL
-    // req.user = {
-    //     id: 1001,
-    //     roleId: 1,
-    //     name: 'TEST'
-    // };
+    req.user = req.session.user
 
     return true;
   }
