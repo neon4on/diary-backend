@@ -6,24 +6,25 @@ import {
   UseGuards,
   ParseIntPipe,
   Post,
-  Body
+  Body,
 } from '@nestjs/common';
 
 import { GradesService } from './grades.service';
 import { AuthGuard } from '../common/guards/auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { DiaryRole } from '../common/enums/diary-role.enum';
 
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, RolesGuard)
 @Controller('grades')
 export class GradesController {
-
   constructor(private gradesService: GradesService) {}
 
   /**
    * Ученик — получить свои оценки
    */
   @Get('my')
+  @Roles(DiaryRole.STUDENT)
   async getMyGrades(@Req() req: any) {
     return this.gradesService.getByStudent(req.user.id);
   }
@@ -34,9 +35,10 @@ export class GradesController {
   @Get('lesson/:id')
   @Roles(DiaryRole.TEACHER)
   async getLessonGrades(
-    @Param('id', ParseIntPipe) lessonId: number
+    @Param('id', ParseIntPipe) lessonId: number,
+    @Req() req: any,
   ) {
-    return this.gradesService.getLessonGrades(lessonId);
+    return this.gradesService.getLessonGrades(lessonId, req.user.id);
   }
 
   /**
@@ -50,21 +52,23 @@ export class GradesController {
       studentId: body.studentId,
       markTypeId: body.markTypeId,
       comment: body.comment,
-      teacherId: req.user.id
+      teacherId: req.user.id,
     });
   }
 
-    @Post('bulk')
-    @Roles(DiaryRole.TEACHER)
-    async bulkSetGrades(@Body() body: any, @Req() req: any) {
-
+  /**
+   * Учитель — массово поставить / обновить оценки
+   */
+  @Post('bulk')
+  @Roles(DiaryRole.TEACHER)
+  async bulkSetGrades(@Body() body: any, @Req() req: any) {
     return this.gradesService.bulkUpsertGrades({
-        lessonId: body.lessonId,
-        studentIds: body.studentIds,
-        markTypeId: body.markTypeId,
-        grades: body.grades,
-        comment: body.comment,
-        teacherId: req.user.id
+      lessonId: body.lessonId,
+      studentIds: body.studentIds,
+      markTypeId: body.markTypeId,
+      grades: body.grades,
+      comment: body.comment,
+      teacherId: req.user.id,
     });
-    }
+  }
 }
