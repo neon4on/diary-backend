@@ -10,7 +10,7 @@ export class AuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const req = context.switchToHttp().getRequest();
 
-    if (process.env.NODE_ENV === 'dev') {
+    if (process.env.NODE_ENV === 'devs') {
         req.user = {
             id: 92,
             roleId: 2 

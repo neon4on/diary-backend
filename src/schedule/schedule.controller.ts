@@ -1,16 +1,26 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ScheduleService } from './schedule.service';
 import { AuthGuard } from '../common/guards/auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { DiaryRole } from '../common/enums/diary-role.enum';
 
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, RolesGuard)
 @Controller('schedule')
 export class ScheduleController {
-
   constructor(private scheduleService: ScheduleService) {}
 
-  @Get()
-  getSchedule() {
-    return this.scheduleService.getSchedule();
+  /**
+   * Учитель — своё актуальное расписание
+   */
+  @Get('my')
+  @Roles(DiaryRole.TEACHER)
+  async getMySchedule(@Req() req: any) {
+    return this.scheduleService.getTeacherSchedule(req.user.id);
   }
-
 }
