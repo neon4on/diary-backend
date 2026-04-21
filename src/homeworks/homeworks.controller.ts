@@ -27,41 +27,43 @@ export class HomeworksController {
   }
 
   /**
-   * Учитель — получить домашки по уроку
+   * Учитель / админ — получить домашки по уроку
    */
   @Get('lesson/:id')
-  @Roles(DiaryRole.TEACHER)
+  @Roles(DiaryRole.TEACHER, DiaryRole.ADMIN)
   async getLessonHomeworks(
     @Param('id', ParseIntPipe) lessonId: number,
     @Req() req: any,
   ) {
-    return this.homeworksService.getLessonHomeworks(lessonId, req.user.id);
+    return this.homeworksService.getLessonHomeworks(lessonId, req.user);
   }
 
   /**
-   * Учитель — создать домашку
+   * Учитель / админ — создать домашку
    *
-   * Варианты:
-   * 1) на весь класс:
+   * Для TEACHER:
    * {
    *   lessonId,
    *   description,
-   *   dueDate,
-   *   resourceLink,
-   *   classId
+   *   dueDate?,
+   *   resourceLink?,
+   *   classId?
+   *   studentIds?
    * }
    *
-   * 2) конкретным ученикам:
+   * Для ADMIN:
    * {
+   *   teacherId,
    *   lessonId,
    *   description,
-   *   dueDate,
-   *   resourceLink,
-   *   studentIds: [1,2,3]
+   *   dueDate?,
+   *   resourceLink?,
+   *   classId?
+   *   studentIds?
    * }
    */
   @Post()
-  @Roles(DiaryRole.TEACHER)
+  @Roles(DiaryRole.TEACHER, DiaryRole.ADMIN)
   async createHomework(@Body() body: any, @Req() req: any) {
     return this.homeworksService.createHomework({
       lessonId: body.lessonId,
@@ -70,7 +72,8 @@ export class HomeworksController {
       resourceLink: body.resourceLink,
       classId: body.classId,
       studentIds: body.studentIds,
-      teacherId: req.user.id,
+      teacherId: body.teacherId,
+      user: req.user,
     });
   }
 }

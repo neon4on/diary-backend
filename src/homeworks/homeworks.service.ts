@@ -4,9 +4,34 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { db } from '../db/knex';
+import { DiaryRole } from '../common/enums/diary-role.enum';
+
+type RequestUser = {
+  id: number;
+  name?: string;
+  roleId: number;
+};
 
 @Injectable()
 export class HomeworksService {
+  private isAdmin(user: RequestUser) {
+    return user.roleId === DiaryRole.ADMIN;
+  }
+
+  private resolveActorTeacherId(user: RequestUser, teacherIdFromBody?: number) {
+    if (this.isAdmin(user)) {
+      const teacherId = Number(teacherIdFromBody);
+
+      if (!teacherId) {
+        throw new ForbiddenException('TEACHER_ID_REQUIRED_FOR_ADMIN');
+      }
+
+      return teacherId;
+    }
+
+    return user.id;
+  }
+
   /**
    * Получить classId ученика
    */
@@ -66,9 +91,6 @@ export class HomeworksService {
     return rows;
   }
 
-  /**
-   * Получить урок или упасть
-   */
   private async getLessonOrFail(lessonId: number) {
     const lesson = await db('diary.diary_lessons as l')
       .select([
@@ -90,10 +112,6 @@ export class HomeworksService {
     return lesson;
   }
 
-  /**
-   * Проверка, что teacher реально ведёт этот урок
-   * через class_id + subject_id
-   */
   private async assertTeacherHasLessonAccess(
     teacherId: number,
     lessonId: number,
@@ -113,11 +131,12 @@ export class HomeworksService {
     return lesson;
   }
 
-  /**
-   * Teacher — получить домашки по уроку
-   */
-  async getLessonHomeworks(lessonId: number, teacherId: number) {
-    const lesson = await this.assertTeacherHasLessonAccess(teacherId, lessonId);
+  async getLessonHomeworks(lessonId: number, user: RequestUser) {
+    const lesson = await this.getLessonOrFail(lessonId);
+
+    if (!this.isAdmin(user)) {
+      await this.assertTeacherHasLessonAccess(user.id, lessonId);
+    }
 
     const rows = await db('diary.diary_homeworks as h')
       .leftJoin('diary.diary_homework_targets as t', 't.homework_id', 'h.id')
@@ -179,9 +198,6 @@ export class HomeworksService {
     };
   }
 
-  /**
-   * Teacher — создать домашку
-   */
   async createHomework(dto: {
     lessonId: number;
     description: string;
@@ -189,19 +205,33 @@ export class HomeworksService {
     resourceLink?: string | null;
     classId?: number | null;
     studentIds?: number[];
-    teacherId: number;
+    teacherId?: number;
+    user: RequestUser;
   }) {
-    const lesson = await this.assertTeacherHasLessonAccess(
-      dto.teacherId,
-      dto.lessonId,
-    );
+    const actorTeacherId = this.resolveActorTeacherId(dto.user, dto.teacherId);
+    const lesson = await this.getLessonOrFail(dto.lessonId);
+
+    if (!this.isAdmin(dto.user)) {
+      await this.assertTeacherHasLessonAccess(dto.user.id, dto.lessonId);
+    } else {
+      const adminTargetAccess = await db('school_local.info_kid_subject_teacher as kst')
+        .where('kst.teacher_id', actorTeacherId)
+        .andWhere('kst.class_id', lesson.class_id)
+        .andWhere('kst.subject_id', lesson.subject_id)
+        .first();
+
+      if (!adminTargetAccess) {
+        throw new ForbiddenException('INVALID_TEACHER_FOR_LESSON');
+      }
+    }
 
     if (!dto.description?.trim()) {
       throw new ForbiddenException('HOMEWORK_DESCRIPTION_REQUIRED');
     }
 
     const hasClassTarget = !!dto.classId;
-    const hasStudentTargets = Array.isArray(dto.studentIds) && dto.studentIds.length > 0;
+    const hasStudentTargets =
+      Array.isArray(dto.studentIds) && dto.studentIds.length > 0;
 
     if (!hasClassTarget && !hasStudentTargets) {
       throw new ForbiddenException('HOMEWORK_TARGET_REQUIRED');
@@ -211,7 +241,7 @@ export class HomeworksService {
       throw new ForbiddenException('ONLY_ONE_TARGET_MODE_ALLOWED');
     }
 
-    if (hasClassTarget && dto.classId !== lesson.class_id) {
+    if (hasClassTarget && Number(dto.classId) !== Number(lesson.class_id)) {
       throw new ForbiddenException('INVALID_CLASS_TARGET');
     }
 
@@ -219,7 +249,7 @@ export class HomeworksService {
 
     if (hasStudentTargets) {
       const students = await db('school_local.info_kid_subject_teacher as kst')
-        .where('kst.teacher_id', dto.teacherId)
+        .where('kst.teacher_id', actorTeacherId)
         .andWhere('kst.class_id', lesson.class_id)
         .andWhere('kst.subject_id', lesson.subject_id)
         .whereIn('kst.kid_id', dto.studentIds!)
@@ -243,25 +273,31 @@ export class HomeworksService {
           description: dto.description.trim(),
           due_date: dto.dueDate ?? null,
           resource_link: dto.resourceLink ?? null,
-          created_by: dto.teacherId,
+          created_by: actorTeacherId,
         },
         ['id'],
       );
 
-      let homeworkId: number;
+      let homeworkId: number | null = null;
 
       if (Array.isArray(inserted) && inserted.length && inserted[0]?.id) {
         homeworkId = Number(inserted[0].id);
-      } else {
+      }
+
+      if (!homeworkId) {
         const row = await trx('diary.diary_homeworks')
           .where({
             lesson_id: dto.lessonId,
-            created_by: dto.teacherId,
+            created_by: actorTeacherId,
           })
           .orderBy('id', 'desc')
           .first();
 
-        homeworkId = Number(row.id);
+        homeworkId = Number(row?.id);
+      }
+
+      if (!homeworkId) {
+        throw new ForbiddenException('HOMEWORK_CREATE_FAILED');
       }
 
       if (hasClassTarget) {
