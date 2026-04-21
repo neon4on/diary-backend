@@ -4,9 +4,34 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { db } from '../db/knex';
+import { DiaryRole } from '../common/enums/diary-role.enum';
+
+type RequestUser = {
+  id: number;
+  name?: string;
+  roleId: number;
+};
 
 @Injectable()
 export class JournalService {
+  private isAdmin(user: RequestUser) {
+    return user.roleId === DiaryRole.ADMIN;
+  }
+
+  private resolveActorTeacherId(user: RequestUser, teacherIdFromBody?: number) {
+    if (this.isAdmin(user)) {
+      const teacherId = Number(teacherIdFromBody);
+
+      if (!teacherId) {
+        throw new ForbiddenException('TEACHER_ID_REQUIRED_FOR_ADMIN');
+      }
+
+      return teacherId;
+    }
+
+    return user.id;
+  }
+
   private async assertTeacherHasJournalAccess(
     teacherId: number,
     classId: number,
@@ -83,13 +108,15 @@ export class JournalService {
   async getJournal(dto: {
     classId: number;
     subjectId: number;
-    teacherId: number;
+    user: RequestUser;
   }) {
-    await this.assertTeacherHasJournalAccess(
-      dto.teacherId,
-      dto.classId,
-      dto.subjectId,
-    );
+    if (!this.isAdmin(dto.user)) {
+      await this.assertTeacherHasJournalAccess(
+        dto.user.id,
+        dto.classId,
+        dto.subjectId,
+      );
+    }
 
     const lessons = await db('diary.diary_lessons as l')
       .leftJoin('diary.diary_lesson_types as lt', 'lt.id', 'l.lesson_type_id')
@@ -111,25 +138,64 @@ export class JournalService {
       .orderBy('l.lesson_date', 'asc')
       .orderBy('l.id', 'asc');
 
+    const lessonIds = lessons.map((l) => l.id);
+
     const students = await db('school_local.info_kid_subject_teacher as kst')
       .leftJoin('sso.users as u', 'u.id', 'kst.kid_id')
-      .where('kst.teacher_id', dto.teacherId)
-      .andWhere('kst.class_id', dto.classId)
+      .where('kst.class_id', dto.classId)
       .andWhere('kst.subject_id', dto.subjectId)
+      .modify((qb) => {
+        if (!this.isAdmin(dto.user)) {
+          qb.andWhere('kst.teacher_id', dto.user.id);
+        }
+      })
       .distinct([
         'kst.kid_id as student_id',
         'u.name as fullName',
       ])
       .orderBy('u.name', 'asc');
 
+    const grades = lessonIds.length
+      ? await db('diary.diary_marks as m')
+          .leftJoin('diary.diary_mark_types as mt', 'mt.id', 'm.mark_type_id')
+          .whereIn('m.lesson_id', lessonIds)
+          .whereNull('m.deleted_at')
+          .select([
+            'm.id',
+            'm.lesson_id as lessonId',
+            'm.student_id as studentId',
+            'm.comment',
+            'mt.id as markTypeId',
+            'mt.code as mark',
+            'mt.numeric_value as value',
+          ])
+      : [];
+
+    const attendance = lessonIds.length
+      ? await db('diary.diary_attendance as a')
+          .whereIn('a.lesson_id', lessonIds)
+          .whereNull('a.deleted_at')
+          .select([
+            'a.id',
+            'a.lesson_id as lessonId',
+            'a.student_id as studentId',
+            'a.status',
+            'a.late_minutes as lateMinutes',
+            'a.comment',
+          ])
+      : [];
+
     return {
       meta: {
         classId: dto.classId,
         subjectId: dto.subjectId,
-        teacherId: dto.teacherId,
+        teacherId: dto.user.id,
+        isAdmin: this.isAdmin(dto.user),
       },
       lessons,
       students,
+      grades,
+      attendance,
     };
   }
 
@@ -141,13 +207,24 @@ export class JournalService {
     lessonTopic?: string;
     lessonTypeId?: number | null;
     status?: string | null;
-    teacherId: number;
+    teacherId?: number;
+    user: RequestUser;
   }) {
-    await this.assertTeacherHasJournalAccess(
-      dto.teacherId,
-      dto.classId,
-      dto.subjectId,
-    );
+    const actorTeacherId = this.resolveActorTeacherId(dto.user, dto.teacherId);
+
+    if (!this.isAdmin(dto.user)) {
+      await this.assertTeacherHasJournalAccess(
+        dto.user.id,
+        dto.classId,
+        dto.subjectId,
+      );
+    } else {
+      await this.assertTeacherHasJournalAccess(
+        actorTeacherId,
+        dto.classId,
+        dto.subjectId,
+      );
+    }
 
     if (!dto.eventId) {
       throw new ForbiddenException('EVENT_ID_REQUIRED');
@@ -160,7 +237,7 @@ export class JournalService {
     const insertPayload = {
       event_id: dto.eventId,
       subject_id: dto.subjectId,
-      teacher_id: dto.teacherId,
+      teacher_id: actorTeacherId,
       class_id: dto.classId,
       lesson_date: dto.lessonDate,
       lesson_topic: dto.lessonTopic?.trim() || null,
@@ -181,7 +258,7 @@ export class JournalService {
         .where({
           event_id: dto.eventId,
           subject_id: dto.subjectId,
-          teacher_id: dto.teacherId,
+          teacher_id: actorTeacherId,
           class_id: dto.classId,
           lesson_date: dto.lessonDate,
         })
@@ -197,8 +274,12 @@ export class JournalService {
     };
   }
 
-  async getLessonComments(lessonId: number, teacherId: number) {
-    const lesson = await this.assertTeacherHasLessonAccess(teacherId, lessonId);
+  async getLessonComments(lessonId: number, user: RequestUser) {
+    const lesson = await this.getLessonOrFail(lessonId);
+
+    if (!this.isAdmin(user)) {
+      await this.assertTeacherHasLessonAccess(user.id, lessonId);
+    }
 
     const comments = await db('diary.diary_lesson_comments as lc')
       .leftJoin('sso.users as u', 'u.id', 'lc.teacher_id')
@@ -229,9 +310,21 @@ export class JournalService {
   async addLessonComment(dto: {
     lessonId: number;
     comment: string;
-    teacherId: number;
+    teacherId?: number;
+    user: RequestUser;
   }) {
-    await this.assertTeacherHasLessonAccess(dto.teacherId, dto.lessonId);
+    const actorTeacherId = this.resolveActorTeacherId(dto.user, dto.teacherId);
+    const lesson = await this.getLessonOrFail(dto.lessonId);
+
+    if (!this.isAdmin(dto.user)) {
+      await this.assertTeacherHasLessonAccess(dto.user.id, dto.lessonId);
+    } else {
+      await this.assertTeacherHasJournalAccess(
+        actorTeacherId,
+        lesson.class_id,
+        lesson.subject_id,
+      );
+    }
 
     const comment = String(dto.comment ?? '').trim();
 
@@ -241,7 +334,7 @@ export class JournalService {
 
     await db('diary.diary_lesson_comments').insert({
       lesson_id: dto.lessonId,
-      teacher_id: dto.teacherId,
+      teacher_id: actorTeacherId,
       comment,
     });
 
@@ -250,8 +343,12 @@ export class JournalService {
     };
   }
 
-  async getStudentComments(lessonId: number, teacherId: number) {
-    const lesson = await this.assertTeacherHasLessonAccess(teacherId, lessonId);
+  async getStudentComments(lessonId: number, user: RequestUser) {
+    const lesson = await this.getLessonOrFail(lessonId);
+
+    if (!this.isAdmin(user)) {
+      await this.assertTeacherHasLessonAccess(user.id, lessonId);
+    }
 
     const comments = await db('diary.diary_student_comments as sc')
       .leftJoin('sso.users as su', 'su.id', 'sc.student_id')
@@ -287,15 +384,24 @@ export class JournalService {
     lessonId: number;
     studentId: number;
     comment: string;
-    teacherId: number;
+    teacherId?: number;
+    user: RequestUser;
   }) {
-    const lesson = await this.assertTeacherHasLessonAccess(
-      dto.teacherId,
-      dto.lessonId,
-    );
+    const actorTeacherId = this.resolveActorTeacherId(dto.user, dto.teacherId);
+    const lesson = await this.getLessonOrFail(dto.lessonId);
+
+    if (!this.isAdmin(dto.user)) {
+      await this.assertTeacherHasLessonAccess(dto.user.id, dto.lessonId);
+    } else {
+      await this.assertTeacherHasJournalAccess(
+        actorTeacherId,
+        lesson.class_id,
+        lesson.subject_id,
+      );
+    }
 
     await this.assertTeacherHasStudentAccess(
-      dto.teacherId,
+      actorTeacherId,
       lesson.class_id,
       lesson.subject_id,
       dto.studentId,
@@ -310,7 +416,7 @@ export class JournalService {
     await db('diary.diary_student_comments').insert({
       lesson_id: dto.lessonId,
       student_id: dto.studentId,
-      teacher_id: dto.teacherId,
+      teacher_id: actorTeacherId,
       comment,
     });
 
