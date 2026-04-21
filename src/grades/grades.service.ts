@@ -4,6 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { db } from '../db/knex';
+import { DiaryRole } from '../common/enums/diary-role.enum';
+
+type RequestUser = {
+  id: number;
+  name?: string;
+  roleId: number;
+};
 
 @Injectable()
 export class GradesService {
@@ -81,6 +88,24 @@ export class GradesService {
     return Object.values(result);
   }
 
+  private isAdmin(user: RequestUser) {
+    return user.roleId === DiaryRole.ADMIN;
+  }
+
+  private resolveActorTeacherId(user: RequestUser, teacherIdFromBody?: number) {
+    if (this.isAdmin(user)) {
+      const teacherId = Number(teacherIdFromBody);
+
+      if (!teacherId) {
+        throw new ForbiddenException('TEACHER_ID_REQUIRED_FOR_ADMIN');
+      }
+
+      return teacherId;
+    }
+
+    return user.id;
+  }
+
   private async getLessonOrFail(lessonId: number) {
     const lesson = await db('diary.diary_lessons as l')
       .select([
@@ -120,8 +145,12 @@ export class GradesService {
     return lesson;
   }
 
-  async getLessonGrades(lessonId: number, teacherId: number) {
-    const lesson = await this.assertTeacherHasLessonAccess(teacherId, lessonId);
+  async getLessonGrades(lessonId: number, user: RequestUser) {
+    const lesson = await this.getLessonOrFail(lessonId);
+
+    if (!this.isAdmin(user)) {
+      await this.assertTeacherHasLessonAccess(user.id, lessonId);
+    }
 
     const rows = await db('school_local.info_kid_subject_teacher as kst')
       .leftJoin('sso.users as u', 'u.id', 'kst.kid_id')
@@ -131,9 +160,13 @@ export class GradesService {
           .andOnNull('m.deleted_at');
       })
       .leftJoin('diary.diary_mark_types as mt', 'mt.id', 'm.mark_type_id')
-      .where('kst.teacher_id', teacherId)
-      .andWhere('kst.class_id', lesson.class_id)
+      .where('kst.class_id', lesson.class_id)
       .andWhere('kst.subject_id', lesson.subject_id)
+      .modify((qb) => {
+        if (!this.isAdmin(user)) {
+          qb.andWhere('kst.teacher_id', user.id);
+        }
+      })
       .select([
         'kst.kid_id as student_id',
         'u.name as student_name',
@@ -167,15 +200,28 @@ export class GradesService {
     studentId: number;
     markTypeId: number;
     comment?: string;
-    teacherId: number;
+    teacherId?: number;
+    user: RequestUser;
   }) {
-    const lesson = await this.assertTeacherHasLessonAccess(
-      dto.teacherId,
-      dto.lessonId,
-    );
+    const actorTeacherId = this.resolveActorTeacherId(dto.user, dto.teacherId);
+    const lesson = await this.getLessonOrFail(dto.lessonId);
+
+    if (!this.isAdmin(dto.user)) {
+      await this.assertTeacherHasLessonAccess(dto.user.id, dto.lessonId);
+    } else {
+      const adminTargetAccess = await db('school_local.info_kid_subject_teacher as kst')
+        .where('kst.teacher_id', actorTeacherId)
+        .andWhere('kst.class_id', lesson.class_id)
+        .andWhere('kst.subject_id', lesson.subject_id)
+        .first();
+
+      if (!adminTargetAccess) {
+        throw new ForbiddenException('INVALID_TEACHER_FOR_LESSON');
+      }
+    }
 
     const studentAccess = await db('school_local.info_kid_subject_teacher as kst')
-      .where('kst.teacher_id', dto.teacherId)
+      .where('kst.teacher_id', actorTeacherId)
       .andWhere('kst.class_id', lesson.class_id)
       .andWhere('kst.subject_id', lesson.subject_id)
       .andWhere('kst.kid_id', dto.studentId)
@@ -208,6 +254,7 @@ export class GradesService {
         .update({
           mark_type_id: dto.markTypeId,
           comment: dto.comment ?? null,
+          teacher_id: actorTeacherId,
         });
 
       return { updated: true };
@@ -218,7 +265,7 @@ export class GradesService {
       student_id: dto.studentId,
       mark_type_id: dto.markTypeId,
       comment: dto.comment ?? null,
-      teacher_id: dto.teacherId,
+      teacher_id: actorTeacherId,
     });
 
     return { created: true };
@@ -230,12 +277,25 @@ export class GradesService {
     markTypeId?: number;
     grades?: { studentId: number; markTypeId: number }[];
     comment?: string;
-    teacherId: number;
+    teacherId?: number;
+    user: RequestUser;
   }) {
-    const lesson = await this.assertTeacherHasLessonAccess(
-      dto.teacherId,
-      dto.lessonId,
-    );
+    const actorTeacherId = this.resolveActorTeacherId(dto.user, dto.teacherId);
+    const lesson = await this.getLessonOrFail(dto.lessonId);
+
+    if (!this.isAdmin(dto.user)) {
+      await this.assertTeacherHasLessonAccess(dto.user.id, dto.lessonId);
+    } else {
+      const adminTargetAccess = await db('school_local.info_kid_subject_teacher as kst')
+        .where('kst.teacher_id', actorTeacherId)
+        .andWhere('kst.class_id', lesson.class_id)
+        .andWhere('kst.subject_id', lesson.subject_id)
+        .first();
+
+      if (!adminTargetAccess) {
+        throw new ForbiddenException('INVALID_TEACHER_FOR_LESSON');
+      }
+    }
 
     const lock = await db('diary.diary_mark_locks')
       .where({ lesson_id: dto.lessonId })
@@ -248,7 +308,6 @@ export class GradesService {
 
     let items: { studentId: number; markTypeId: number }[] = [];
 
-    // режим: одна и та же оценка пачке учеников
     if (dto.studentIds?.length && dto.markTypeId) {
       items = dto.studentIds.map((studentId) => ({
         studentId,
@@ -256,7 +315,6 @@ export class GradesService {
       }));
     }
 
-    // режим: разные оценки разным ученикам
     if (dto.grades?.length) {
       items = dto.grades;
     }
@@ -269,7 +327,7 @@ export class GradesService {
     }
 
     const allowedStudents = await db('school_local.info_kid_subject_teacher as kst')
-      .where('kst.teacher_id', dto.teacherId)
+      .where('kst.teacher_id', actorTeacherId)
       .andWhere('kst.class_id', lesson.class_id)
       .andWhere('kst.subject_id', lesson.subject_id)
       .whereIn(
@@ -286,6 +344,10 @@ export class GradesService {
 
     if (!filteredItems.length) {
       throw new ForbiddenException('NO_ACCESS_TO_STUDENTS');
+    }
+
+    if (filteredItems.length !== items.length) {
+      throw new ForbiddenException('INVALID_STUDENT_TARGETS');
     }
 
     const existing = await db('diary.diary_marks')
@@ -318,7 +380,7 @@ export class GradesService {
           student_id: item.studentId,
           mark_type_id: item.markTypeId,
           comment: dto.comment ?? null,
-          teacher_id: dto.teacherId,
+          teacher_id: actorTeacherId,
         });
       }
     }
@@ -329,6 +391,7 @@ export class GradesService {
         .update({
           mark_type_id: u.mark_type_id,
           comment: u.comment,
+          teacher_id: actorTeacherId,
         });
     }
 
