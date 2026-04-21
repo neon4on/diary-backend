@@ -4,11 +4,36 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { db } from '../db/knex';
+import { DiaryRole } from '../common/enums/diary-role.enum';
 
 type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 
+type RequestUser = {
+  id: number;
+  name?: string;
+  roleId: number;
+};
+
 @Injectable()
 export class AttendanceService {
+  private isAdmin(user: RequestUser) {
+    return user.roleId === DiaryRole.ADMIN;
+  }
+
+  private resolveActorTeacherId(user: RequestUser, teacherIdFromBody?: number) {
+    if (this.isAdmin(user)) {
+      const teacherId = Number(teacherIdFromBody);
+
+      if (!teacherId) {
+        throw new ForbiddenException('TEACHER_ID_REQUIRED_FOR_ADMIN');
+      }
+
+      return teacherId;
+    }
+
+    return user.id;
+  }
+
   private normalizeStatus(status: string): AttendanceStatus {
     const value = String(status ?? '').trim().toLowerCase();
 
@@ -21,7 +46,10 @@ export class AttendanceService {
     return value as AttendanceStatus;
   }
 
-  private normalizeLateMinutes(status: AttendanceStatus, lateMinutes?: number | null) {
+  private normalizeLateMinutes(
+    status: AttendanceStatus,
+    lateMinutes?: number | null,
+  ) {
     if (status !== 'late') {
       return null;
     }
@@ -97,8 +125,12 @@ export class AttendanceService {
     }
   }
 
-  async getLessonAttendance(lessonId: number, teacherId: number) {
-    const lesson = await this.assertTeacherHasLessonAccess(teacherId, lessonId);
+  async getLessonAttendance(lessonId: number, user: RequestUser) {
+    const lesson = await this.getLessonOrFail(lessonId);
+
+    if (!this.isAdmin(user)) {
+      await this.assertTeacherHasLessonAccess(user.id, lessonId);
+    }
 
     const rows = await db('school_local.info_kid_subject_teacher as kst')
       .leftJoin('sso.users as u', 'u.id', 'kst.kid_id')
@@ -107,9 +139,13 @@ export class AttendanceService {
           .andOn('a.lesson_id', '=', db.raw('?', [lessonId]))
           .andOnNull('a.deleted_at');
       })
-      .where('kst.teacher_id', teacherId)
-      .andWhere('kst.class_id', lesson.class_id)
+      .where('kst.class_id', lesson.class_id)
       .andWhere('kst.subject_id', lesson.subject_id)
+      .modify((qb) => {
+        if (!this.isAdmin(user)) {
+          qb.andWhere('kst.teacher_id', user.id);
+        }
+      })
       .select([
         'kst.kid_id as student_id',
         'u.name as student_name',
@@ -144,15 +180,28 @@ export class AttendanceService {
     status: string;
     lateMinutes?: number | null;
     comment?: string | null;
-    teacherId: number;
+    teacherId?: number;
+    user: RequestUser;
   }) {
-    const lesson = await this.assertTeacherHasLessonAccess(
-      dto.teacherId,
-      dto.lessonId,
-    );
+    const actorTeacherId = this.resolveActorTeacherId(dto.user, dto.teacherId);
+    const lesson = await this.getLessonOrFail(dto.lessonId);
+
+    if (!this.isAdmin(dto.user)) {
+      await this.assertTeacherHasLessonAccess(dto.user.id, dto.lessonId);
+    } else {
+      const adminTargetAccess = await db('school_local.info_kid_subject_teacher as kst')
+        .where('kst.teacher_id', actorTeacherId)
+        .andWhere('kst.class_id', lesson.class_id)
+        .andWhere('kst.subject_id', lesson.subject_id)
+        .first();
+
+      if (!adminTargetAccess) {
+        throw new ForbiddenException('INVALID_TEACHER_FOR_LESSON');
+      }
+    }
 
     await this.assertTeacherHasStudentAccess(
-      dto.teacherId,
+      actorTeacherId,
       lesson.class_id,
       lesson.subject_id,
       dto.studentId,
@@ -200,12 +249,25 @@ export class AttendanceService {
       lateMinutes?: number | null;
       comment?: string | null;
     }[];
-    teacherId: number;
+    teacherId?: number;
+    user: RequestUser;
   }) {
-    const lesson = await this.assertTeacherHasLessonAccess(
-      dto.teacherId,
-      dto.lessonId,
-    );
+    const actorTeacherId = this.resolveActorTeacherId(dto.user, dto.teacherId);
+    const lesson = await this.getLessonOrFail(dto.lessonId);
+
+    if (!this.isAdmin(dto.user)) {
+      await this.assertTeacherHasLessonAccess(dto.user.id, dto.lessonId);
+    } else {
+      const adminTargetAccess = await db('school_local.info_kid_subject_teacher as kst')
+        .where('kst.teacher_id', actorTeacherId)
+        .andWhere('kst.class_id', lesson.class_id)
+        .andWhere('kst.subject_id', lesson.subject_id)
+        .first();
+
+      if (!adminTargetAccess) {
+        throw new ForbiddenException('INVALID_TEACHER_FOR_LESSON');
+      }
+    }
 
     const items = Array.isArray(dto.items) ? dto.items : [];
 
@@ -219,7 +281,7 @@ export class AttendanceService {
     const requestedIds = items.map((i) => Number(i.studentId));
 
     const allowedStudents = await db('school_local.info_kid_subject_teacher as kst')
-      .where('kst.teacher_id', dto.teacherId)
+      .where('kst.teacher_id', actorTeacherId)
       .andWhere('kst.class_id', lesson.class_id)
       .andWhere('kst.subject_id', lesson.subject_id)
       .whereIn('kst.kid_id', requestedIds)

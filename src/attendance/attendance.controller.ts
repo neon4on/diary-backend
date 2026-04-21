@@ -21,30 +21,41 @@ export class AttendanceController {
   constructor(private attendanceService: AttendanceService) {}
 
   /**
-   * Учитель — посещаемость по уроку
+   * Учитель / админ — посещаемость по уроку
    */
   @Get('lesson/:id')
-  @Roles(DiaryRole.TEACHER)
+  @Roles(DiaryRole.TEACHER, DiaryRole.ADMIN)
   async getLessonAttendance(
     @Param('id', ParseIntPipe) lessonId: number,
     @Req() req: any,
   ) {
-    return this.attendanceService.getLessonAttendance(lessonId, req.user.id);
+    return this.attendanceService.getLessonAttendance(lessonId, req.user);
   }
 
   /**
-   * Учитель — поставить / обновить посещаемость одному ученику
-   * body:
+   * Учитель / админ — поставить / обновить посещаемость одному ученику
+   *
+   * Для TEACHER:
    * {
-   *   lessonId: number,
-   *   studentId: number,
-   *   status: string,
-   *   lateMinutes?: number | null,
-   *   comment?: string | null
+   *   lessonId,
+   *   studentId,
+   *   status,
+   *   lateMinutes?,
+   *   comment?
+   * }
+   *
+   * Для ADMIN:
+   * {
+   *   lessonId,
+   *   studentId,
+   *   status,
+   *   lateMinutes?,
+   *   comment?,
+   *   teacherId
    * }
    */
   @Post()
-  @Roles(DiaryRole.TEACHER)
+  @Roles(DiaryRole.TEACHER, DiaryRole.ADMIN)
   async upsertAttendance(@Body() body: any, @Req() req: any) {
     return this.attendanceService.upsertAttendance({
       lessonId: body.lessonId,
@@ -52,32 +63,35 @@ export class AttendanceController {
       status: body.status,
       lateMinutes: body.lateMinutes,
       comment: body.comment,
-      teacherId: req.user.id,
+      teacherId: body.teacherId,
+      user: req.user,
     });
   }
 
   /**
-   * Учитель — массово поставить / обновить посещаемость
-   * body:
+   * Учитель / админ — массово поставить / обновить посещаемость
+   *
+   * Для TEACHER:
    * {
-   *   lessonId: number,
-   *   items: [
-   *     {
-   *       studentId: number,
-   *       status: string,
-   *       lateMinutes?: number | null,
-   *       comment?: string | null
-   *     }
-   *   ]
+   *   lessonId,
+   *   items: [{ studentId, status, lateMinutes?, comment? }]
+   * }
+   *
+   * Для ADMIN:
+   * {
+   *   lessonId,
+   *   teacherId,
+   *   items: [{ studentId, status, lateMinutes?, comment? }]
    * }
    */
   @Post('bulk')
-  @Roles(DiaryRole.TEACHER)
+  @Roles(DiaryRole.TEACHER, DiaryRole.ADMIN)
   async bulkUpsertAttendance(@Body() body: any, @Req() req: any) {
     return this.attendanceService.bulkUpsertAttendance({
       lessonId: body.lessonId,
       items: body.items,
-      teacherId: req.user.id,
+      teacherId: body.teacherId,
+      user: req.user,
     });
   }
 }
