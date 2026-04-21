@@ -1,8 +1,10 @@
 import {
   Controller,
   Get,
+  Query,
   Req,
   UseGuards,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { ScheduleService } from './schedule.service';
 import { AuthGuard } from '../common/guards/auth.guard';
@@ -22,5 +24,17 @@ export class ScheduleController {
   @Roles(DiaryRole.TEACHER)
   async getMySchedule(@Req() req: any) {
     return this.scheduleService.getTeacherSchedule(req.user.id);
+  }
+
+  /**
+   * Админ — расписание конкретного учителя
+   * /schedule?teacherId=92
+   */
+  @Get()
+  @Roles(DiaryRole.ADMIN)
+  async getTeacherScheduleForAdmin(
+    @Query('teacherId', ParseIntPipe) teacherId: number,
+  ) {
+    return this.scheduleService.getTeacherSchedule(teacherId);
   }
 }
